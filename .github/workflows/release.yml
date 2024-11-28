@@ -17,16 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    container:
+      image: clux/muslrust:stable
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
-      - name: Configure Git
-        run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
 
       - name: Set version
         id: version
@@ -42,23 +39,16 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
           fi
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
       - name: Build static binary
         run: |
           # Build fully static binary
-          RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl
           
           # Verify binary is static
-          if ldd target/x86_64-unknown-linux-musl/release/github-db &> /dev/null; then
+          file target/x86_64-unknown-linux-musl/release/github-db | grep "statically linked"
+          
+          # Additional static check
+          if ! ldd target/x86_64-unknown-linux-musl/release/github-db 2>&1 | grep -q "not a dynamic executable"; then
             echo "Binary is not static!"
             exit 1
           fi
@@ -84,6 +74,12 @@ jobs:
           else
             git log --pretty=format:"* %s" >> RELEASE_NOTES.md
           fi
+          
+          echo "" >> RELEASE_NOTES.md
+          echo "### Binary Information" >> RELEASE_NOTES.md
+          echo "\`\`\`" >> RELEASE_NOTES.md
+          file github-db-linux-x86_64 >> RELEASE_NOTES.md
+          echo "\`\`\`" >> RELEASE_NOTES.md
           
           echo "" >> RELEASE_NOTES.md
           echo "### SHA256 Checksum" >> RELEASE_NOTES.md
