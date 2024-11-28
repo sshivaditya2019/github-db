@@ -1,56 +1,32 @@
 # Setup Instructions
 
-## Initial Setup (For Maintainer)
+## For Maintainers
 
-1. Create both repositories on GitHub:
+1. Create repositories:
 ```bash
-# Create the template repository first
-gh repo create github-db-template --public --clone
-cd github-db-template
-git lfs install
-cp -r /path/to/original/template/* .
-git add .
-git commit -m "Initial template setup"
-git push -u origin main
-cd ..
-
-# Create the main repository
-gh repo create github-db --public --clone
-cd github-db
+# Create both repositories
+gh repo create github-db --public
+gh repo create github-db-template --public
 ```
 
-2. Set up the main repository:
+2. Run setup script:
 ```bash
-# Copy all source files except template/
-cp -r /path/to/original/{src,Cargo.toml,.github,.gitignore,.gitattributes} .
-
-# Initialize with submodule
-git init
-git submodule add https://github.com/YOUR_USERNAME/github-db-template.git template
-git add .
-git commit -m "Initial commit"
-git push -u origin main
+./setup.sh
+# Enter your GitHub username when prompted
 ```
 
-3. Create a Personal Access Token:
-- Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-- Generate new token with `repo` scope
-- Add token as repository secret:
-```bash
-gh secret set TEMPLATE_TOKEN -b"your_token_here"
-```
-
-4. Create first release:
+3. Create first release:
 ```bash
 git tag -a v0.1.0 -m "Initial release"
 git push origin v0.1.0
 ```
 
-## Using the Database (For Users)
+## For Users
 
 1. Create new database from template:
 ```bash
-gh repo create my-database --template MAINTAINER_USERNAME/github-db-template
+# Create repository from template
+gh repo create my-database --template OWNER/github-db-template
 cd my-database
 ```
 
@@ -58,7 +34,7 @@ cd my-database
 ```bash
 # Download latest binary
 curl -L -o github-db \
-  https://github.com/MAINTAINER_USERNAME/github-db/releases/latest/download/github-db-linux-x86_64
+  https://github.com/OWNER/github-db/releases/latest/download/github-db-linux-x86_64
 chmod +x github-db
 
 # Generate certificate
@@ -70,58 +46,48 @@ chmod +x github-db
 # Add certificate (required)
 gh secret set DB_CERT -b"$(cat certs/my-cert.cert | base64)"
 
-# Add encryption key (optional but recommended)
+# Add encryption key (optional)
 gh secret set DB_KEY -b"$(openssl rand -base64 32)"
 ```
 
 4. Start using the database:
-
-A. Using data files:
 ```bash
-# Add document
+# Add documents through data/ directory
 echo '{"name": "test"}' > data/doc1.json
 git add data/doc1.json
 git commit -m "Add doc1"
 git push
 ```
 
-B. Using GitHub Actions:
+## Updating to New Versions
+
+When a new version of github-db is released, update your database workflow:
+
+1. Edit `.github/workflows/database.yml`:
+```yaml
+# Update the binary download URL
+curl -L -o github-db https://github.com/OWNER/github-db/releases/download/vX.Y.Z/github-db-linux-x86_64
+```
+
+2. Commit and push:
 ```bash
-# Create document
-gh workflow run database.yml -f operation=create -f id=doc2 -f data='{"name": "test2"}'
-
-# Read document
-gh workflow run database.yml -f operation=read -f id=doc2
-
-# Update document
-gh workflow run database.yml -f operation=update -f id=doc2 -f data='{"name": "updated"}'
-
-# Delete document
-gh workflow run database.yml -f operation=delete -f id=doc2
-
-# List all documents
-gh workflow run database.yml -f operation=list
+git add .github/workflows/database.yml
+git commit -m "Update to github-db vX.Y.Z"
+git push
 ```
 
 ## Troubleshooting
 
-1. If submodule update fails:
-```bash
-# Fix submodule URL
-git submodule sync
-git submodule update --init --force
-```
+1. If workflow fails:
+- Check certificate is properly base64 encoded
+- Verify DB_CERT secret is set
+- Ensure workflow has proper permissions
 
-2. If release workflow fails:
-- Ensure TEMPLATE_TOKEN is set correctly
-- Verify both repositories exist and are accessible
-- Check repository permissions
+2. If encryption fails:
+- Verify DB_KEY is exactly 32 bytes
+- Update DB_KEY secret if needed
 
-3. If certificate verification fails:
-- Regenerate certificate
-- Ensure DB_CERT is base64 encoded
-- Update repository secret
-
-4. If encryption fails:
-- Ensure DB_KEY is exactly 32 bytes
-- Update repository secret
+3. If file sync fails:
+- Check Git LFS is properly configured
+- Verify file permissions
+- Ensure JSON is valid

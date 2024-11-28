@@ -1,4 +1,4 @@
 [submodule "template"]
     path = template
-    url = ../github-db-template.git
+    url = https://github.com/sshivaditya2019/github-db-template.git
     branch = main
