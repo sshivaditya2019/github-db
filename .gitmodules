@@ -1,0 +1,4 @@
+[submodule "template"]
+    path = template
+    url = ../github-db-template.git
+    branch = main
