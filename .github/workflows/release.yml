@@ -4,64 +4,129 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
 
 jobs:
-  build:
-    name: Build Release Binary
+  release:
+    name: Build and Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
+          fetch-depth: 0
           submodules: true
+
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+            if ! [[ "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid version format. Must be vX.Y.Z"
+              exit 1
+            fi
+            git tag ${{ github.event.inputs.version }}
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
 
-      - name: Install musl-tools
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Build Release Binary
+      - name: Build static binary
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl
+          # Build fully static binary
+          RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-musl
+          
+          # Verify binary is static
+          if ldd target/x86_64-unknown-linux-musl/release/github-db &> /dev/null; then
+            echo "Binary is not static!"
+            exit 1
+          fi
+          
+          # Strip debug symbols
           strip target/x86_64-unknown-linux-musl/release/github-db
-          mv target/x86_64-unknown-linux-musl/release/github-db github-db-linux-x86_64
+          
+          # Rename and make executable
+          cp target/x86_64-unknown-linux-musl/release/github-db github-db-linux-x86_64
+          chmod +x github-db-linux-x86_64
+          
+          # Test binary
+          ./github-db-linux-x86_64 --help
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          echo "## GitHub DB Release ${{ env.VERSION }}" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "### Changes" >> RELEASE_NOTES.md
+          if git describe --tags --abbrev=0 HEAD^ &> /dev/null; then
+            git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --pretty=format:"* %s" >> RELEASE_NOTES.md
+          else
+            git log --pretty=format:"* %s" >> RELEASE_NOTES.md
+          fi
+          
+          echo "" >> RELEASE_NOTES.md
+          echo "### SHA256 Checksum" >> RELEASE_NOTES.md
+          sha256sum github-db-linux-x86_64 | awk '{print $1}' >> RELEASE_NOTES.md
 
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            github-db-linux-x86_64
+          name: Release ${{ env.VERSION }}
+          body_path: RELEASE_NOTES.md
+          files: github-db-linux-x86_64
           draft: false
           prerelease: false
-          generate_release_notes: true
+          tag_name: ${{ env.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  template:
-    name: Update Template Repository
-    needs: build
+  update-template:
+    needs: release
     runs-on: ubuntu-latest
+    if: success()
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout template repository
+        uses: actions/checkout@v3
         with:
           repository: ${{ github.repository_owner }}/github-db-template
           token: ${{ secrets.TEMPLATE_TOKEN }}
+          fetch-depth: 0
 
-      - name: Update Template
+      - name: Update template workflow
         run: |
-          # Update workflow to use the new release
-          sed -i "s|github-db/releases/.*download/|github-db/releases/download/${{ github.ref_name }}/|" .github/workflows/database.yml
+          # Update the binary download URL in workflow files
+          VERSION="${{ env.VERSION }}"
+          DOWNLOAD_URL="github-db/releases/download/${VERSION}/github-db-linux-x86_64"
           
+          find .github/workflows -type f -name "*.yml" -exec sed -i \
+            "s|github-db/releases/.*/github-db-linux-x86_64|${DOWNLOAD_URL}|g" {} \;
+          
+          # Commit and push changes
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          git add .github/workflows/database.yml
-          git commit -m "Update to release ${{ github.ref_name }}" || echo "No changes to commit"
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          git add .github/workflows/
+          git commit -m "Update binary version to ${VERSION}"
           git push
