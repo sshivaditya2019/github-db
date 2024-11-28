@@ -17,13 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    container:
-      image: clux/muslrust:stable
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Set version
         id: version
@@ -39,25 +40,13 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
           fi
 
-      - name: Build static binary
+      - name: Build binary
         run: |
-          # Build fully static binary
-          cargo build --release --target x86_64-unknown-linux-musl
-          
-          # Verify binary is static
-          file target/x86_64-unknown-linux-musl/release/github-db | grep "statically linked"
-          
-          # Additional static check
-          if ! ldd target/x86_64-unknown-linux-musl/release/github-db 2>&1 | grep -q "not a dynamic executable"; then
-            echo "Binary is not static!"
-            exit 1
-          fi
-          
-          # Strip debug symbols
-          strip target/x86_64-unknown-linux-musl/release/github-db
+          # Build release binary
+          cargo build --release
           
           # Rename and make executable
-          cp target/x86_64-unknown-linux-musl/release/github-db github-db-linux-x86_64
+          cp target/release/github-db github-db-linux-x86_64
           chmod +x github-db-linux-x86_64
           
           # Test binary

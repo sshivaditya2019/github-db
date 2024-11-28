@@ -8,7 +8,7 @@ authors = ["Cline"]
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-git2 = { version = "0.18", features = ["vendored-openssl", "vendored-libgit2", "static-curl", "static-ssl"] }
+git2 = { version = "0.18", features = ["vendored-openssl", "vendored-libgit2"] }
 aes-gcm = "0.10"
 base64 = "0.21"
 clap = { version = "4.4", features = ["derive", "env"] }
@@ -26,6 +26,3 @@ lto = true
 codegen-units = 1
 panic = 'abort'
 strip = true
-
-[target.x86_64-unknown-linux-musl]
-rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=-static"]

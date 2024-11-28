@@ -2,24 +2,19 @@
 
 A secure, Git LFS-backed JSON database with certificate-based authentication and native GitHub Actions support.
 
-## Quick Start
+## Building Locally
 
-### For Maintainers
-
-1. Setup repositories:
 ```bash
-# Clone this repository
-git clone https://github.com/your-username/github-db
-cd github-db
+# Make build script executable
+chmod +x build.sh
 
-# Run setup script
-chmod +x setup.sh
-./setup.sh
+# Build the binary
+./build.sh
 
-# Create first release
-git tag -a v0.1.0 -m "Initial release"
-git push origin v0.1.0
+# The binary will be at ./github-db-linux-x86_64
 ```
+
+## Quick Start
 
 ### For Users
 
@@ -58,7 +53,6 @@ gh workflow run database.yml -f operation=create -f id=doc2 -f data='{"name": "t
 
 ## Features
 
-- **Zero Dependencies**: Single static binary
 - **Git LFS Storage**: Efficient handling of large datasets
 - **Certificate Authentication**: Secure access control
 - **Optional Encryption**: AES-256-GCM for sensitive data
@@ -78,20 +72,25 @@ gh workflow run database.yml -f operation=create -f id=doc2 -f data='{"name": "t
 - [Template README](template/README.md)
 - [Example Workflow](.github/workflows/example.yml)
 
-## Updating
+## Building From Source
 
-When a new version is released:
+### Requirements
 
-1. Update workflow file:
-```yaml
-# In .github/workflows/database.yml
-curl -L -o github-db https://github.com/OWNER/github-db/releases/download/vX.Y.Z/github-db-linux-x86_64
+- Rust toolchain (install via rustup)
+- Git
+- OpenSSL development libraries
+
+### Build Steps
+
+1. Clone the repository:
+```bash
+git clone https://github.com/OWNER/github-db.git
+cd github-db
 ```
 
-2. Commit and push:
+2. Build binary:
 ```bash
-git commit -am "Update to vX.Y.Z"
-git push
+./build.sh
 ```
 
 ## License
