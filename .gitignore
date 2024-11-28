@@ -27,3 +27,6 @@ Thumbs.db
 # Release binaries
 github-db-*
 github-db
+
+# Setup Files
+./setup.sh
