@@ -1,0 +1,17 @@
+{
+  "name": "Example Document",
+  "description": "This is an example document that demonstrates the file-based operation mode",
+  "metadata": {
+    "created": "2024-01-01",
+    "tags": ["example", "demo"],
+    "version": 1
+  },
+  "data": {
+    "field1": "value1",
+    "field2": 42,
+    "field3": {
+      "nested": "value",
+      "array": [1, 2, 3]
+    }
+  }
+}

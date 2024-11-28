@@ -1,0 +1,96 @@
+name: Example GitHub DB Usage
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: true
+
+      - name: Set up Git LFS
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Build github-db
+        run: cargo build --release
+
+      - name: Generate certificate
+        run: |
+          ./target/release/github-db generate-cert github-actions -o ./certs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  demo:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: true
+
+      - name: Set up Git LFS
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Create document
+        run: |
+          ./target/release/github-db -c ./certs/github-actions.cert create doc1 '{"name": "Test Document", "value": 42}'
+
+      - name: Read document
+        run: |
+          ./target/release/github-db -c ./certs/github-actions.cert read doc1
+
+      - name: Update document
+        run: |
+          ./target/release/github-db -c ./certs/github-actions.cert update doc1 '{"name": "Updated Document", "value": 100}'
+
+      - name: List documents
+        run: |
+          ./target/release/github-db -c ./certs/github-actions.cert list
+
+      # Optional: Use with encryption
+      - name: Create encrypted document
+        run: |
+          ./target/release/github-db -c ./certs/github-actions.cert -k "${{ secrets.DB_KEY }}" create secret1 '{"sensitive": "data"}'
+
+      # Commit changes back to the repository
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Commit changes
+        run: |
+          git add .github-db/
+          git commit -m "Update database" || echo "No changes to commit"
+          git push
+
+  cleanup:
+    needs: demo
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build github-db
+        run: cargo build --release
+
+      - name: Revoke certificate
+        run: |
+          ./target/release/github-db revoke-cert github-actions
+
+      - name: Commit certificate changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add certs/
+          git commit -m "Revoke workflow certificate" || echo "No changes to commit"
+          git push

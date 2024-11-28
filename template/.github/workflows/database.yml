@@ -1,0 +1,174 @@
+name: Database Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation type'
+        required: true
+        type: choice
+        options:
+          - create
+          - read
+          - update
+          - delete
+      data:
+        description: 'JSON data payload'
+        required: false
+        type: string
+      id:
+        description: 'Document ID (must be unique for create)'
+        required: false
+        type: string
+  push:
+    paths:
+      - 'data/**'
+
+env:
+  DB_CERT_CONTENT: ${{ secrets.DB_CERT }}
+  DB_KEY: ${{ secrets.DB_KEY }}
+  DB_JSON_OUTPUT: "true"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Input
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ github.event.inputs.operation }}" == "create" || "${{ github.event.inputs.operation }}" == "update" ]]; then
+            if [[ -z "${{ github.event.inputs.data }}" ]]; then
+              echo "Data is required for create/update operations"
+              exit 1
+            fi
+          fi
+          if [[ -z "${{ github.event.inputs.id }}" && "${{ github.event.inputs.operation }}" != "list" ]]; then
+            echo "Document ID is required for all operations except list"
+            exit 1
+          fi
+
+  database:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: true
+
+      - name: Set up Git LFS
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Download github-db
+        run: |
+          curl -L -o github-db https://github.com/your-org/github-db/releases/latest/download/github-db-linux-x86_64
+          chmod +x github-db
+
+      - name: Check ID Uniqueness
+        if: github.event.inputs.operation == 'create'
+        run: |
+          if ./github-db list | grep -q "\"${{ github.event.inputs.id }}\""; then
+            echo "Error: Document ID already exists"
+            exit 1
+          fi
+
+      - name: Process File Changes
+        if: github.event_name == 'push'
+        run: |
+          for file in $(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep '^data/.*\.json$'); do
+            if [ -f "$file" ]; then
+              # File was created or modified
+              id=$(basename "$file" .json)
+              if ./github-db list | grep -q "\"$id\""; then
+                echo "Updating $id"
+                cat "$file" | ./github-db --stdin update "$id"
+              else
+                echo "Creating $id"
+                cat "$file" | ./github-db --stdin create "$id"
+              fi
+            else
+              # File was deleted
+              id=$(basename "$file" .json)
+              echo "Deleting $id"
+              ./github-db delete "$id"
+            fi
+          done
+
+      - name: Execute Database Operation
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          case "${{ github.event.inputs.operation }}" in
+            create)
+              echo '${{ github.event.inputs.data }}' | ./github-db --stdin create "${{ github.event.inputs.id }}"
+              ;;
+            read)
+              ./github-db read "${{ github.event.inputs.id }}"
+              ;;
+            update)
+              echo '${{ github.event.inputs.data }}' | ./github-db --stdin update "${{ github.event.inputs.id }}"
+              ;;
+            delete)
+              ./github-db delete "${{ github.event.inputs.id }}"
+              ;;
+            *)
+              ./github-db list
+              ;;
+          esac
+
+      - name: Verify Operation
+        if: github.event.inputs.operation == 'create' || github.event.inputs.operation == 'update'
+        run: |
+          # Verify the document exists and matches
+          result=$(./github-db read "${{ github.event.inputs.id }}")
+          echo "Verification result:"
+          echo "$result"
+          
+          # Compare with input data
+          input_data='${{ github.event.inputs.data }}'
+          if [[ $(echo "$result" | jq -r .data) != $(echo "$input_data" | jq -r .) ]]; then
+            echo "Data verification failed"
+            exit 1
+          fi
+
+      - name: Commit Changes
+        if: success()
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add .github-db/
+          git commit -m "Database operation: ${{ github.event.inputs.operation || 'file sync' }} [skip ci]" || echo "No changes to commit"
+          git push
+
+  example:
+    needs: database
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'create'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Example CRUD Operations
+        run: |
+          # Create example document
+          echo '{"name": "Example", "value": 42}' | ./github-db --stdin create example1
+          
+          # Read it back
+          ./github-db read example1
+          
+          # Update it
+          echo '{"name": "Updated Example", "value": 100}' | ./github-db --stdin update example1
+          
+          # Verify update
+          ./github-db read example1
+          
+          # List all documents
+          ./github-db list
+          
+          # Delete the example
+          ./github-db delete example1
+          
+          # Verify deletion
+          if ./github-db read example1; then
+            echo "Document should have been deleted"
+            exit 1
+          fi
