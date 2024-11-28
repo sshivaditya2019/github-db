@@ -30,3 +30,8 @@ github-db
 
 # Setup Files
 ./setup.sh
+
+
+# Ignore the certs in any .github-db directory
+.github-db/certs/**.cert
+.github-db/certs/**.key

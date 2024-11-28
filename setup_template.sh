@@ -22,6 +22,11 @@ if [ "$REPO_EXISTS" != "false" ]; then
         echo -e "${YELLOW}Resetting repository...${NC}"
         gh repo delete "${GITHUB_USER}/github-db-template" --yes || true
         gh repo create github-db-template --public --confirm
+        
+        # Clean up existing template directory if it exists
+        if [ -d "../github-db-template" ]; then
+            rm -rf "../github-db-template"
+        fi
     else
         echo -e "${YELLOW}Using existing repository...${NC}"
         # Clean up existing template directory if it exists
@@ -41,6 +46,7 @@ mkdir -p ../github-db-template
 cd ../github-db-template
 
 # Initialize Git and LFS
+rm -rf .git || true  # Remove any existing git repository
 git init
 git lfs install
 
@@ -161,32 +167,17 @@ source .env
 - Regularly rotate certificates
 EOL
 
-# Check if we're using existing repository
-if [ "$REPO_EXISTS" != "false" ] && [[ ! $RESET_REPO =~ ^[Yy]$ ]]; then
-    # Fetch existing repository
-    git fetch origin
-    git reset --hard origin/main
-    
-    # Apply new changes
-    echo -e "\n${GREEN}Updating existing repository...${NC}"
-    git add .
-    git commit -m "Update template configuration" || echo -e "${YELLOW}No changes to commit${NC}"
-else
-    # Add all files and commit
-    echo -e "\n${GREEN}Committing files...${NC}"
-    git add .
-    git commit -m "Initial template setup"
-    git branch -M main
-fi
+# Add all files and commit
+echo -e "\n${GREEN}Committing files...${NC}"
+git add .
+git commit -m "Initial template setup"
+git branch -M main
 
-# Push to GitHub
+# Set up remote and push
 echo -e "\n${GREEN}Pushing to GitHub...${NC}"
-if [ "$REPO_EXISTS" != "false" ] && [[ ! $RESET_REPO =~ ^[Yy]$ ]]; then
-    git push --force-with-lease origin main
-else
-    git remote add origin "https://github.com/${GITHUB_USER}/github-db-template.git"
-    git push -u origin main
-fi
+git remote remove origin 2>/dev/null || true  # Remove existing remote if any
+git remote add origin "https://github.com/${GITHUB_USER}/github-db-template.git"
+git push -u origin main --force  # Force push since we're resetting
 
 echo -e "\n${GREEN}Template repository setup complete!${NC}"
 echo -e "\nNext steps:"
