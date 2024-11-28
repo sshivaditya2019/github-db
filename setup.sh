@@ -38,38 +38,17 @@ cd ../github-db
 echo "Creating main repository..."
 gh repo create github-db --public --confirm || true
 
-# Clean up existing files
-rm -rf template
-rm -f .gitmodules
-
 # Initialize main repository
 git init
 git add .
 git commit -m "Initial commit: Core implementation"
 git branch -M main
 git remote add origin "https://github.com/${GITHUB_USER}/github-db.git"
-
-# Add template as submodule
-echo "Adding template as submodule..."
-cat > .gitmodules << EOL
-[submodule "template"]
-    path = template
-    url = https://github.com/${GITHUB_USER}/github-db-template.git
-    branch = main
-EOL
-
-git submodule add "https://github.com/${GITHUB_USER}/github-db-template.git" template
-git add .gitmodules template
-git commit -m "Add template submodule"
 git push -u origin main
 
 echo -e "${GREEN}Setup complete!${NC}"
 echo -e "\nNext steps:"
-echo -e "1. Add TEMPLATE_TOKEN to github-db repository:"
-echo -e "   - Go to GitHub Settings → Developer settings → Personal access tokens"
-echo -e "   - Generate new token with 'repo' scope"
-echo -e "   - Run: gh secret set TEMPLATE_TOKEN -b\"your_token_here\""
-echo -e "\n2. Create initial release:"
+echo -e "1. Create initial release:"
 echo -e "   git tag -a v0.1.0 -m \"Initial release\""
 echo -e "   git push origin v0.1.0"
 echo -e "\nTo create a new database instance:"

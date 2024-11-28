@@ -22,22 +22,11 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          submodules: false
 
       - name: Configure Git
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-
-      - name: Update submodule configuration
-        run: |
-          # Replace placeholder with actual owner
-          sed -i "s/GITHUB_OWNER/${{ github.repository_owner }}/g" .gitmodules
-          cat .gitmodules
-          
-          # Initialize and update submodule
-          git submodule init
-          git submodule update
 
       - name: Set version
         id: version
