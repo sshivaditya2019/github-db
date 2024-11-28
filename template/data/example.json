@@ -1,6 +1,6 @@
 {
   "name": "Example Document",
-  "description": "This is an example document that demonstrates the file-based operation mode",
+  "description": "This is an example document showing the structure",
   "metadata": {
     "created": "2024-01-01",
     "tags": ["example", "demo"],
@@ -9,8 +9,8 @@
   "data": {
     "field1": "value1",
     "field2": 42,
-    "field3": {
-      "nested": "value",
+    "nested": {
+      "key": "value",
       "array": [1, 2, 3]
     }
   }

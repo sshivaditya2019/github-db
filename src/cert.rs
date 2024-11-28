@@ -5,17 +5,44 @@ use openssl::{
     x509::{X509Builder, X509},
 };
 use std::{fs, path::{Path, PathBuf}};
-use crate::DbError;
+use crate::{DbError, Crypto};
 
 pub struct CertManager {
     certs_path: PathBuf,
+    crypto: Option<Crypto>,
 }
 
 impl CertManager {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P, encryption_key: Option<&[u8]>) -> Result<Self> {
         let certs_path = path.as_ref().join("certs");
         fs::create_dir_all(&certs_path)?;
-        Ok(Self { certs_path })
+        
+        let crypto = if let Some(key) = encryption_key {
+            Some(Crypto::new(key)?)
+        } else {
+            None
+        };
+
+        Ok(Self { 
+            certs_path,
+            crypto,
+        })
+    }
+
+    fn encrypt_data(&self, data: &[u8]) -> Result<Vec<u8>> {
+        if let Some(crypto) = &self.crypto {
+            crypto.encrypt(data)
+        } else {
+            Ok(data.to_vec())
+        }
+    }
+
+    fn decrypt_data(&self, data: &[u8]) -> Result<Vec<u8>> {
+        if let Some(crypto) = &self.crypto {
+            crypto.decrypt(data)
+        } else {
+            Ok(data.to_vec())
+        }
     }
 
     pub fn generate_cert(&self, username: &str) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -43,14 +70,21 @@ impl CertManager {
         builder.sign(&private_key, openssl::hash::MessageDigest::sha256())?;
         let certificate = builder.build();
 
-        // Save certificate and private key
+        // Get PEM encoded data
+        let cert_pem = certificate.to_pem()?;
+        let key_pem = private_key.private_key_to_pem_pkcs8()?;
+
+        // Encrypt and save certificate and private key
+        let encrypted_cert = self.encrypt_data(&cert_pem)?;
+        let encrypted_key = self.encrypt_data(&key_pem)?;
+
         let cert_path = self.certs_path.join(format!("{}.cert", username));
         let key_path = self.certs_path.join(format!("{}.key", username));
         
-        fs::write(&cert_path, certificate.to_pem()?)?;
-        fs::write(&key_path, private_key.private_key_to_pem_pkcs8()?)?;
+        fs::write(&cert_path, &encrypted_cert)?;
+        fs::write(&key_path, &encrypted_key)?;
 
-        Ok((certificate.to_pem()?, private_key.private_key_to_pem_pkcs8()?))
+        Ok((cert_pem, key_pem))
     }
 
     pub fn verify_cert(&self, username: &str, cert_data: &[u8]) -> Result<bool> {
@@ -63,7 +97,9 @@ impl CertManager {
             return Ok(false);
         }
 
-        let stored_cert_data = fs::read(&stored_cert_path)?;
+        // Read and decrypt stored certificate
+        let encrypted_cert_data = fs::read(&stored_cert_path)?;
+        let stored_cert_data = self.decrypt_data(&encrypted_cert_data)?;
         let stored_cert = X509::from_pem(&stored_cert_data)?;
 
         // Compare certificates
@@ -108,7 +144,7 @@ mod tests {
     #[test]
     fn test_certificate_operations() -> Result<()> {
         let dir = tempdir()?;
-        let cert_manager = CertManager::new(dir.path())?;
+        let cert_manager = CertManager::new(dir.path(), None)?;
 
         // Generate certificate
         let username = "testuser";
@@ -124,6 +160,25 @@ mod tests {
         // Revoke certificate
         cert_manager.revoke_cert(username)?;
         assert!(!cert_manager.verify_cert(username, &cert)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encrypted_certificates() -> Result<()> {
+        let dir = tempdir()?;
+        let key = [0u8; 32]; // 32-byte key for testing
+        let cert_manager = CertManager::new(dir.path(), Some(&key))?;
+
+        // Generate and verify encrypted certificate
+        let username = "testuser";
+        let (cert, _key) = cert_manager.generate_cert(username)?;
+        assert!(cert_manager.verify_cert(username, &cert)?);
+
+        // Verify the stored file is actually encrypted
+        let cert_path = dir.path().join("certs").join("testuser.cert");
+        let stored_data = fs::read(cert_path)?;
+        assert_ne!(&stored_data, &cert); // Stored data should be encrypted
 
         Ok(())
     }

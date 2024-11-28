@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
+use std::cmp::Ordering;
 
 mod crypto;
 mod git;
@@ -25,6 +26,8 @@ pub enum DbError {
     Json(String),
     #[error("Certificate error: {0}")]
     Certificate(String),
+    #[error("Filter error: {0}")]
+    Filter(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +36,127 @@ pub struct Document {
     pub data: serde_json::Value,
     pub created_at: u64,
     pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FilterOp {
+    Eq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterCondition {
+    pub field: String,
+    pub op: FilterOp,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Filter {
+    And(Vec<Filter>),
+    Or(Vec<Filter>),
+    Condition(FilterCondition),
+}
+
+fn compare_values(a: &serde_json::Value, b: &serde_json::Value) -> Result<Ordering> {
+    match (a, b) {
+        (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
+            if let (Some(a), Some(b)) = (a.as_f64(), b.as_f64()) {
+                Ok(a.partial_cmp(&b).unwrap_or(Ordering::Equal))
+            } else {
+                Err(anyhow::anyhow!("Invalid number comparison"))
+            }
+        },
+        (serde_json::Value::String(a), serde_json::Value::String(b)) => {
+            Ok(a.cmp(b))
+        },
+        (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => {
+            Ok(a.cmp(b))
+        },
+        _ => Err(anyhow::anyhow!("Cannot compare values of different types")),
+    }
+}
+
+impl Filter {
+    fn matches(&self, doc: &Document) -> Result<bool> {
+        match self {
+            Filter::And(filters) => {
+                for filter in filters {
+                    if !filter.matches(doc)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            },
+            Filter::Or(filters) => {
+                for filter in filters {
+                    if filter.matches(doc)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            },
+            Filter::Condition(condition) => {
+                let value = get_nested_value(&doc.data, &condition.field)
+                    .ok_or_else(|| anyhow::anyhow!("Field not found: {}", condition.field))?;
+
+                match &condition.op {
+                    FilterOp::Eq => Ok(value == &condition.value),
+                    FilterOp::Gt => Ok(compare_values(value, &condition.value)? == Ordering::Greater),
+                    FilterOp::Lt => Ok(compare_values(value, &condition.value)? == Ordering::Less),
+                    FilterOp::Gte => {
+                        let cmp = compare_values(value, &condition.value)?;
+                        Ok(cmp == Ordering::Greater || cmp == Ordering::Equal)
+                    },
+                    FilterOp::Lte => {
+                        let cmp = compare_values(value, &condition.value)?;
+                        Ok(cmp == Ordering::Less || cmp == Ordering::Equal)
+                    },
+                    FilterOp::Contains => {
+                        match (value, &condition.value) {
+                            (serde_json::Value::String(field), serde_json::Value::String(pattern)) => {
+                                Ok(field.contains(pattern))
+                            },
+                            _ => Err(anyhow::anyhow!("Contains operation requires string values")),
+                        }
+                    },
+                    FilterOp::StartsWith => {
+                        match (value, &condition.value) {
+                            (serde_json::Value::String(field), serde_json::Value::String(pattern)) => {
+                                Ok(field.starts_with(pattern))
+                            },
+                            _ => Err(anyhow::anyhow!("StartsWith operation requires string values")),
+                        }
+                    },
+                    FilterOp::EndsWith => {
+                        match (value, &condition.value) {
+                            (serde_json::Value::String(field), serde_json::Value::String(pattern)) => {
+                                Ok(field.ends_with(pattern))
+                            },
+                            _ => Err(anyhow::anyhow!("EndsWith operation requires string values")),
+                        }
+                    },
+                }
+            }
+        }
+    }
+}
+
+fn get_nested_value<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = value;
+    
+    for part in parts {
+        current = current.get(part)?;
+    }
+    
+    Some(current)
 }
 
 pub struct GithubDb {
@@ -51,7 +175,7 @@ impl GithubDb {
         } else {
             None
         };
-        let cert_manager = CertManager::new(path.as_ref())?;
+        let cert_manager = CertManager::new(path.as_ref(), encryption_key)?;
 
         Ok(Self {
             storage,
@@ -66,7 +190,6 @@ impl GithubDb {
     }
 
     pub fn verify_certificate(&self, cert_data: &[u8]) -> Result<bool> {
-        // Extract username from certificate
         let cert = openssl::x509::X509::from_pem(cert_data)
             .map_err(|e| DbError::Certificate(format!("Invalid certificate: {}", e)))?;
         
@@ -154,6 +277,24 @@ impl GithubDb {
     pub fn list(&self) -> Result<Vec<String>> {
         self.storage.list()
     }
+
+    pub fn find(&self, filter: Option<Filter>) -> Result<Vec<Document>> {
+        let ids = self.list()?;
+        let mut results = Vec::new();
+
+        for id in ids {
+            let doc = self.read(&id)?;
+            if let Some(filter) = &filter {
+                if filter.matches(&doc)? {
+                    results.push(doc);
+                }
+            } else {
+                results.push(doc);
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -200,7 +341,7 @@ mod tests {
     #[test]
     fn test_encryption() -> Result<()> {
         let dir = tempdir()?;
-        let key = [0u8; 32]; // 32-byte key filled with zeros for testing
+        let key = [0u8; 32];
         let mut db = GithubDb::new(dir.path(), Some(&key))?;
 
         // Generate test certificate
@@ -233,6 +374,68 @@ mod tests {
         // Revoke certificate
         db.revoke_certificate(username)?;
         assert!(!db.verify_certificate(&cert)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_filters() -> Result<()> {
+        let dir = tempdir()?;
+        let mut db = GithubDb::new(dir.path(), None)?;
+
+        // Generate test certificate
+        let (cert, _) = db.generate_certificate("testuser")?;
+        assert!(db.verify_certificate(&cert)?);
+
+        // Create test documents
+        db.create("user1", json!({
+            "name": "Alice",
+            "age": 25,
+            "city": "New York"
+        }))?;
+
+        db.create("user2", json!({
+            "name": "Bob",
+            "age": 30,
+            "city": "San Francisco"
+        }))?;
+
+        // Test equality filter
+        let filter = Filter::Condition(FilterCondition {
+            field: "name".to_string(),
+            op: FilterOp::Eq,
+            value: json!("Alice"),
+        });
+        let results = db.find(Some(filter))?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].data["name"], "Alice");
+
+        // Test numeric comparison
+        let filter = Filter::Condition(FilterCondition {
+            field: "age".to_string(),
+            op: FilterOp::Gt,
+            value: json!(27),
+        });
+        let results = db.find(Some(filter))?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].data["name"], "Bob");
+
+        // Test AND filter
+        let filter = Filter::And(vec![
+            Filter::Condition(FilterCondition {
+                field: "age".to_string(),
+                op: FilterOp::Gte,
+                value: json!(25),
+            }),
+            Filter::Condition(FilterCondition {
+                field: "city".to_string(),
+                op: FilterOp::Contains,
+                value: json!("York"),
+            }),
+        ]);
+        let results = db.find(Some(filter))?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].data["name"], "Alice");
 
         Ok(())
     }

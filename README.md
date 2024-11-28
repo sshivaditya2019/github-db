@@ -2,21 +2,35 @@
 
 A secure, Git LFS-backed JSON database with certificate-based authentication and native GitHub Actions support.
 
-## Building Locally
+## For Maintainers
+
+### 1. Build and Release
 
 ```bash
-# Make build script executable
-chmod +x build.sh
-
-# Build the binary
+# Build locally
 ./build.sh
 
-# The binary will be at ./github-db-linux-x86_64
+# Create release
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
 ```
 
-## Quick Start
+### 2. Set Up Template Repository
 
-### For Users
+```bash
+# Run template setup script
+./setup_template.sh
+
+# Follow prompts to create template repository
+```
+
+Then:
+1. Go to your template repository settings
+2. Enable "Template repository" option
+
+## For Users
+
+### Quick Start
 
 1. Create database from template:
 ```bash
@@ -58,17 +72,10 @@ gh workflow run database.yml -f operation=create -f id=doc2 -f data='{"name": "t
 - **Optional Encryption**: AES-256-GCM for sensitive data
 - **GitHub Actions Ready**: Native CI/CD integration
 
-## Security
-
-- Certificate-based authentication
-- Optional AES-256-GCM encryption
-- Git LFS for efficient storage
-- Automated maintenance
-- Full audit trail
-
 ## Documentation
 
 - [Setup Instructions](SETUP.md)
+- [Template Setup Guide](TEMPLATE_SETUP.md)
 - [Template README](template/README.md)
 - [Example Workflow](.github/workflows/example.yml)
 
@@ -91,6 +98,15 @@ cd github-db
 2. Build binary:
 ```bash
 ./build.sh
+```
+
+## Repository Structure
+
+```
+.
+├── src/            # Core implementation
+├── template/       # Template repository files
+└── .github/        # GitHub Actions workflows
 ```
 
 ## License

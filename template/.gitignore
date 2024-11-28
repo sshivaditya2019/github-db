@@ -1,0 +1,22 @@
+# Binary
+github-db
+github-db-linux-x86_64
+
+# Certificates
+*.cert
+*.key
+certs/
+
+# Temporary files
+*.tmp
+*.bak
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
