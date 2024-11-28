@@ -26,3 +26,6 @@ lto = true
 codegen-units = 1
 panic = 'abort'
 strip = true
+
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "target-feature=+crt-static"]
